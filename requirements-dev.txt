@@ -1,0 +1,5 @@
+# Hermetic acceptance-test harness (no external services, no API keys).
+pytest>=7.4
+pytest-asyncio>=0.23
+fakeredis>=2.20
+SQLAlchemy>=2.0
