@@ -1,60 +1,107 @@
-"""Hermetic tests for the live-audio seam: RimeTTS cancel wrapper + InterruptionDetector.
+"""Hermetic tests for the live-audio seam: RimeStreamer facade + InterruptionDetector.
 
-Neither module imports livekit at import time, so we can test the cancellation
-fallback logic and the noise-gate without any heavy deps or API keys.
+No network, no keys, no LiveKit: the streamer's async seams are stubbed and we assert
+the facade contract (speak schedules synthesis, cancel drops chunks + marks mechanism).
+Protocol-level behavior (real ws3 clear op, PCM forwarding) is exercised by the
+live /ws/call smoke test and evidence/preflight.py.
 """
 from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from agent.stt_pipeline import InterruptionDetector
-from agent.tts_rime import RimeTTS
+from agent.tts_rime import RimeStreamer
 
 
-class _FakeLiveKitSession:
-    """Emulates the subset of the livekit session API RimeTTS probes for."""
+@pytest.mark.asyncio
+async def test_speak_schedules_and_cancel_drops(monkeypatch):
+    calls = []
 
-    def __init__(self, fail_native: bool = False):
-        self.interrupted = False
-        self.said = []
-        self.fail_native = fail_native
+    async def fake_synth(self, token, text, v):
+        calls.append(("synth", text, v))
 
-    def say(self, text):
-        self.said.append(text)
+    async def fake_clear(self):
+        calls.append("clear")
 
-    def interrupt(self):
-        if self.fail_native:
-            raise RuntimeError("native cancel unsupported")
-        self.interrupted = True
+    monkeypatch.setattr(RimeStreamer, "_synthesize", fake_synth)
+    monkeypatch.setattr(RimeStreamer, "_clear", fake_clear)
 
-
-def test_native_cancel_preferred():
-    lk = _FakeLiveKitSession()
-    tts = RimeTTS(session=lk)
+    tts = RimeStreamer()
     tts.speak("hello", 1)
+    await asyncio.sleep(0.01)
+    assert ("synth", "hello", 1) in calls
+    assert tts.should_forward_chunk() is True   # speaking again re-opens the stream
+
     tts.cancel()
-    assert lk.interrupted
-    assert tts.last_cancel_mechanism == "native:interrupt"
+    await asyncio.sleep(0.01)
+    assert "clear" in calls
+    assert tts.should_forward_chunk() is False  # chunks dropped after cancel
+    assert tts.last_cancel_mechanism == "ws3:clear+drop"
+
+
+@pytest.mark.asyncio
+async def test_cancel_without_connection_is_safe():
+    tts = RimeStreamer()  # never connected -> _clear must no-op, not raise
+    tts.cancel()
+    await asyncio.sleep(0.01)
     assert tts.should_forward_chunk() is False
+    assert tts.last_cancel_mechanism == "ws3:clear+drop"
 
 
-def test_buffer_drop_fallback_when_native_fails():
-    lk = _FakeLiveKitSession(fail_native=True)
-    tts = RimeTTS(session=lk)
+@pytest.mark.asyncio
+async def test_done_fires_exactly_once_per_utterance():
+    """Natural done + stall watchdog + cancel must not double-fire speech_end."""
+    done_count = []
+
+    async def on_done():
+        done_count.append(1)
+
+    tts = RimeStreamer(on_done=on_done)
     tts.speak("hello", 1)
-    tts.cancel()
-    assert tts.last_cancel_mechanism == "buffer_drop"
-    assert tts.should_forward_chunk() is False
-    # a fresh speak() re-opens the stream
-    tts.speak("after", 2)
-    assert tts.should_forward_chunk() is True
+    token = tts._current
+    # three racing completions for the same utterance
+    await tts._fire_done(token)
+    await tts._fire_done(token)
+    await tts._fire_done(token)
+    assert len(done_count) == 1
+    assert tts.active is False
 
 
-def test_buffer_drop_without_livekit_session():
-    tts = RimeTTS(session=None)
-    tts.speak("hello", 1)
+@pytest.mark.asyncio
+async def test_superseded_utterance_done_does_not_kill_new_one(monkeypatch):
+    """A stray done for a CANCELLED utterance must not end the next utterance early."""
+    done_count = []
+
+    async def on_done():
+        done_count.append(1)
+
+    class _FakeWS:
+        closed = False
+        async def send_str(self, s): pass
+
+    async def fake_connect(self):
+        self._ws = _FakeWS()
+
+    monkeypatch.setattr(RimeStreamer, "_connect", fake_connect)
+
+    tts = RimeStreamer(on_done=on_done)
+    tts.speak("first", 1)
+    old_token = tts._current
     tts.cancel()
-    assert tts.last_cancel_mechanism == "buffer_drop"
+    await asyncio.sleep(0.01)
+    assert len(done_count) == 1        # cancel ended utterance 1
+
+    tts.speak("second", 2)             # new utterance, new token (sends on fake ws)
+    await asyncio.sleep(0.05)
+    await tts._fire_done(old_token)    # stray done from the old one arrives late
+    await asyncio.sleep(0.01)
+    assert len(done_count) == 1        # must NOT fire for utterance 2
+    assert tts.active is True          # utterance 2 still speaking
+
+    tts.cancel()                       # clean up the background watchdog loop
+    await asyncio.sleep(0.02)
 
 
 def test_detector_noise_does_not_interrupt(make_tm):

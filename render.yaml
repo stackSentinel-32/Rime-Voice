@@ -1,45 +1,48 @@
 # Render deployment — single free web service.
 #
-# Deploys the FastAPI app (UI + dashboard + booking tools + LiveKit token endpoint)
-# on SQLite + in-process state. It boots and demos the interruption evidence with
-# ZERO secrets. Add secrets in the Render dashboard to level up:
+# Deploys the FastAPI app (landing UI + evidence dashboard + booking tools +
+# live voice WebSocket). Boots on SQLite + in-process fakeredis with ZERO
+# secrets: the landing page and interruption evidence work immediately.
+# Add the three API keys in the Render dashboard to enable the live agent.
 #
-#   LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET  -> enables /token (live call tab)
-#   REDIS_URL (e.g. Upstash free tier)                  -> shared session state
-#   DATABASE_URL (e.g. Render Postgres free)            -> durable bookings
-#   RIME_* / DEEPGRAM_* / GEMINI_*                      -> live agent worker (see README)
+# Free-tier notes:
+#   * filesystem is ephemeral per deploy — synthetic data reseeds at boot (by design)
+#   * service spins down after ~15 min idle; first request then takes ~30s to wake
+#   * WebSockets (/ws/call) are supported on the free plan
 #
 services:
   - type: web
-    name: rime-voice
+    name: glow-and-go-voice
     runtime: docker
     plan: free
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # ---- non-secret configuration (boots fully configured) ----
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: STT_PROVIDER
         value: deepgram
-      # secrets — set these in the Render dashboard (sync: false = do not commit values)
-      - key: LIVEKIT_URL
-        sync: false
-      - key: LIVEKIT_API_KEY
-        sync: false
-      - key: LIVEKIT_API_SECRET
-        sync: false
-      - key: RIME_API_KEY
-        sync: false
       - key: RIME_MODEL
-        sync: false
+        value: mistv3
       - key: RIME_SPEAKER
+        value: cove
+      - key: RIME_LANG
+        value: en
+      - key: DEEPGRAM_MODEL
+        value: nova-2
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: TOOL_CALL_DELAY_MS
+        value: "0"
+      # ---- secrets: set these in the Render dashboard (Environment tab) ----
+      - key: RIME_API_KEY
         sync: false
       - key: DEEPGRAM_API_KEY
         sync: false
-      - key: GEMINI_API_KEY
+      - key: GROQ_API_KEY
         sync: false
-      - key: GEMINI_MODEL
-        sync: false
+      # ---- optional upgrades (unset = SQLite + in-process fakeredis) ----
       - key: REDIS_URL
         sync: false
       - key: DATABASE_URL

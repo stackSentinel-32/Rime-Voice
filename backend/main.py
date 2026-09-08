@@ -8,19 +8,21 @@ import asyncio
 import os
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+from fastapi.websockets import WebSocket
 from pydantic import BaseModel
 
 from . import tools as T
 from .db import Base, make_engine, make_session_factory
-from .schemas import CancelReq, CommitReq, LookupReq, UpdateReq
+from .schemas import CancelReq, CommitReq, CreateReq, FindReq, LookupReq, UpdateReq
 from .seed import seed
 
 app = FastAPI(title="Rime Voice Booking Backend")
 
 _engine = make_engine()
-Base.metadata.create_all(_engine)
+from .db import ensure_schema  # noqa: E402
+ensure_schema(_engine)         # add missing columns (e.g. phone) on existing DBs
 _SF = make_session_factory(_engine)
 seed(_SF, n=40, reset=False)  # synthetic data: seed if empty (SQLite/Render boot)
 
@@ -48,27 +50,41 @@ def status():
         "rime_model": os.getenv("RIME_MODEL", "unset"),
         "rime_speaker": os.getenv("RIME_SPEAKER", "unset"),
         "rime_lang": os.getenv("RIME_LANG", "unset"),
-        "llm_provider": "google-gemini",
-        "llm_model": os.getenv("GEMINI_MODEL", "unset"),
+        "llm_provider": "groq",
+        "llm_model": os.getenv("GROQ_MODEL", "unset"),
         "tool_call_delay_ms": _default_delay(),
     }
 
 
-# ---- LiveKit token --------------------------------------------------------
+# ---- live voice call (no LiveKit: browser PCM <-> this server over one WS) ----
 
-@app.get("/token")
-def token(room: str = Query("demo"), identity: str = Query("judge")):
-    key, secret = os.getenv("LIVEKIT_API_KEY"), os.getenv("LIVEKIT_API_SECRET")
-    if not key or not secret:
-        raise HTTPException(503, "LIVEKIT_API_KEY / LIVEKIT_API_SECRET not configured")
+@app.websocket("/ws/call")
+async def ws_call(websocket: WebSocket):
+    await websocket.accept()
+    from .voice import VoiceCallSession
+
+    session = VoiceCallSession(
+        send=lambda msg: websocket.send_json(msg),
+        send_audio=lambda pcm: websocket.send_bytes(pcm),
+        session_factory=_SF,
+    )
     try:
-        from livekit import api
-    except ImportError:
-        raise HTTPException(503, "livekit-api not installed on this deployment")
-    t = api.AccessToken(key, secret).with_identity(identity).with_name(identity)
-    t.with_grants(api.VideoGrants(room_join=True, room=room, can_publish=True, can_subscribe=True))
-    return {"token": t.to_jwt(), "url": os.getenv("LIVEKIT_URL", ""),
-            "room": room, "identity": identity}
+        await session.start()
+        while True:
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            data = msg.get("bytes")
+            text = msg.get("text")
+            if data is not None:
+                await session.feed_audio(data)
+            elif text is not None:
+                # type-to-speak / smoke-test path: treated as a final transcript
+                await session.feed_text(text)
+    except Exception:
+        pass
+    finally:
+        await session.close()
 
 
 # ---- booking tools --------------------------------------------------------
@@ -92,6 +108,25 @@ async def lookup(req: LookupReq):
             return {"turn_version": req.turn_version, "booking": T.lookup_booking(s, req.booking_id)}
         except T.BookingNotFound:
             raise HTTPException(404, "booking not found")
+
+
+@app.post("/tools/find_bookings")
+async def find(req: FindReq):
+    if req.delay_ms and req.delay_ms > 0:
+        await asyncio.sleep(req.delay_ms / 1000)
+    with _SF() as s:
+        return {"turn_version": req.turn_version,
+                "bookings": T.find_bookings(s, req.customer_name, req.phone)}
+
+
+@app.post("/tools/create_booking")
+async def create(req: CreateReq):
+    if req.delay_ms and req.delay_ms > 0:
+        await asyncio.sleep(req.delay_ms / 1000)
+    with _SF() as s:
+        return {"turn_version": req.turn_version,
+                "proposal": T.validate_create(s, req.customer_name, req.date, req.time,
+                                              req.service_type, req.phone)}
 
 
 @app.post("/tools/update_booking")

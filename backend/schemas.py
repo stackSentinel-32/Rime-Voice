@@ -11,6 +11,23 @@ class LookupReq(BaseModel):
     delay_ms: Optional[int] = None
 
 
+class FindReq(BaseModel):
+    customer_name: str = ""
+    phone: str = ""
+    turn_version: int = 0
+    delay_ms: Optional[int] = None
+
+
+class CreateReq(BaseModel):
+    customer_name: str
+    date: str
+    time: str
+    service_type: str = "Haircut"
+    phone: str = ""
+    turn_version: int = 0
+    delay_ms: Optional[int] = None
+
+
 class UpdateReq(BaseModel):
     booking_id: int
     changes: dict = Field(default_factory=dict)

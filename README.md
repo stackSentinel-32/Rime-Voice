@@ -42,7 +42,7 @@ needed for this part; it demos the entire differentiator on its own.
 | Booking backend + tools (FastAPI + Postgres/SQLite) | **Real, running** — synthetic data only |
 | Redis session state (or in-process fakeredis) | **Real, running** |
 | Evidence dashboard + event log (§5.4 schema) | **Real, running** |
-| LiveKit worker / Rime TTS / Deepgram STT / LLM loop | **Code complete, needs API keys** (`agent/worker.py`) |
+| Live voice pipeline (`backend/voice.py` + `/ws/call`) | **Real, running** — Deepgram STT → Groq → tools → Rime streaming, all in the backend process |
 | Rime mid-stream cancel | Wrapper + fallback implemented & unit-tested; **native cancel must be verified against live Rime** (Phase 0) — see RIME_EVIDENCE.md §Limitations |
 
 Honest-labeling policy: `/status` and the UI header always show which providers are live.
@@ -51,18 +51,14 @@ Missing keys degrade to clear 503s, never fake success.
 ## Running the full voice stack
 
 ```bash
-cp .env.example .env   # fill in LIVEKIT_*, RIME_*, DEEPGRAM_*, GEMINI_*
+cp .env.example .env   # fill in RIME_*, DEEPGRAM_*, GROQ_*
 python evidence/preflight.py          # secret + config preflight (live API checks)
 
-# 1. infra + UI + dashboard
+# 1. infra + UI + dashboard + live voice pipeline
 docker compose up --build
 
-# 2. agent worker (joins LiveKit rooms; publishes Rime audio)
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m agent.worker
-
-# 3. open http://localhost:8000 → "Live Call" → Connect
+# 2. open http://localhost:8000 → "Live Call" → Connect
+#    (mic → Deepgram STT → Groq → booking tools → Rime back, all in-process)
 ```
 
 Open [http://localhost:8000/status](http://localhost:8000/status) to confirm providers.
@@ -83,7 +79,7 @@ triple — one call proves key + model + speaker + lang together):
 | Audio format | `mp3` (`audioFormat` query param) | Also `wav`, `ogg`, `webm`, `pcm`/`l16`, `mulaw` |
 | Sampling rate | `24000` Hz (`samplingRate` query param) | Rime default; values above 24 kHz are upsampled |
 | Transport | WebSocket query params + JSON messages | Synthesis args on the connection URL; audio streams back as base64 JSON chunks |
-| LLM (tool calling) | Gemini `gemini-3.8-flash` | GA, agent-tuned; via `google-genai` SDK / `livekit-plugins-google` |
+| LLM (tool calling) | Groq `openai/gpt-oss-20b` | Low-latency (~1000 T/s); OpenAI-compatible API |
 
 ⚠️ Requests that omit `modelId` are served by Mist v3, **not** the expected default —
 we always set it explicitly. Unset/invalid keys degrade to 503s (see Failure behavior).
@@ -93,9 +89,8 @@ we always set it explicitly. Unset/invalid keys degrade to 503s (see Failure beh
 | Service | Role | Key env vars | Required for |
 |---|---|---|---|
 | Rime (users.rime.ai) | TTS — the voice | `RIME_API_KEY`, `RIME_MODEL`, `RIME_SPEAKER`, `RIME_LANG` | Live call audio |
-| Google Gemini (generativelanguage.googleapis.com) | Tool-calling LLM | `GEMINI_API_KEY`, `GEMINI_MODEL` | Intent→tool decisions in live calls |
+| Groq (api.groq.com) | Tool-calling LLM | `GROQ_API_KEY`, `GROQ_MODEL` | Intent→tool decisions in live calls |
 | Deepgram | Streaming STT (interim results) | `DEEPGRAM_API_KEY`, `DEEPGRAM_MODEL` | Barge-in transcription |
-| LiveKit Cloud | Room transport, VAD, WebRTC | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | `/token` + live call tab |
 | Redis | Turn-version state store | `REDIS_URL` | Full app (fakeredis fallback in tests) |
 | PostgreSQL | Booking records | `DATABASE_URL` | Full app (SQLite fallback) |
 
@@ -105,55 +100,55 @@ No component ever fakes success — missing credentials degrade loudly and speci
 
 | What's missing | Behavior |
 |---|---|
-| No keys at all (Render default) | App boots; dashboard + evidence run fully (hermetic path); `/token` → **503** "not configured"; UI pills show "not configured" |
+| No keys at all (Render default) | App boots; dashboard + evidence run fully (hermetic path); `/ws/call` closes with a logged error; UI pills show "not configured" |
 | Bad/invalid Rime key or model/speaker triple | `evidence/preflight.py` FAILs with the HTTP code (401 = key, 400 = triple); live call won't produce audio |
-| Gemini key missing | Worker logs `llm_unavailable` per utterance (structured event, visible in logs); **turn-versioning still works** — interruption handling is LLM-independent |
-| Gemini API error mid-call | Worker logs `llm_error` and continues the callback loop; session survives |
+| Groq key missing | Call logs `llm_unavailable` event; **turn-versioning still works** — interruption handling is LLM-independent |
+| Groq API error mid-call | Call logs `llm_error` and continues; session survives |
 | Redis/Postgres down | Compose healthchecks block backend start; hermetic test path unaffected (fakeredis/SQLite) |
-| LiveKit room unreachable | Worker exits with LiveKit's error; dashboard unaffected |
+| Rime/Deepgram unreachable | Streaming WS fails loudly (events logged); dashboard unaffected |
 
 ## Known limitations
 
 - **STT barge-in floor (~150 ms):** interruption can't be detected before STT surfaces a
   partial transcript; this is additive to our sub-ms orchestration cancel path. Disclosed
   in `RIME_EVIDENCE.md` §Limitations.
-- **Rime native mid-stream cancel unverified live:** wrapper probes for native cancel with
-  a client-side buffer-drop fallback; unit-tested, but the live-plugin mechanism hasn't
-  been confirmed with real keys yet (recorded in RIME_EVIDENCE.md at verification time).
+- **Rime native mid-stream cancel unverified live:** the ws3 `clear` operation + local
+  chunk-drop are implemented and unit-tested; the live mechanism hasn't been measured
+  against the real stream with keys yet (recorded in RIME_EVIDENCE.md at verification time).
 - **Hermetic vs end-to-end latency:** the acceptance test measures the orchestration path
-  (version check + cancel + discard + commit gating), not network/WebRTC audio drain.
+  (version check + cancel + discard + commit gating), not network/browser audio drain.
 - **`coda` quality option:** `mistv3` chosen for lowest TTFB; swap `RIME_MODEL=coda` +
   a Coda voice (e.g. `luna`) if a judge prefers quality over speed.
 - **Synthetic data only** — deterministic seed (42), 40 rows, no real PII.
 
 ## Deploy to Render
 
-`render.yaml` deploys one free web service: UI + dashboard + tools + LiveKit token endpoint
-on SQLite, boots with zero secrets. Add secrets in the Render dashboard (LIVEKIT_*,
-RIME_*, DEEPGRAM_*, GEMINI_*, optional REDIS_URL/DATABASE_URL) to level up.
+`render.yaml` deploys one free web service: UI + dashboard + tools + the live voice
+WebSocket (`/ws/call`) on SQLite, boots with zero secrets. Add secrets in the Render
+dashboard (RIME_*, DEEPGRAM_*, GROQ_*, optional REDIS_URL/DATABASE_URL) to level up.
 
 ## Repo map
 
 ```
 agent/
   turn_manager.py     ← THE core: dispatch tagging, version compare, stale discard, commit gating
-  tts_rime.py         Rime wrapper: native cancel probe + buffer-drop fallback
-  stt_pipeline.py     InterruptionDetector (VAD/STT → on_interrupt), noise gate
-  llm_tools.py        Gemini tool-calling via google-genai (env-switchable model)
-  worker.py           LiveKit composition root (heavy imports deferred)
+  tts_rime.py         RimeStreamer: ws3 streaming PCM, `clear`-op server-side cancel
+  stt_pipeline.py     DeepgramStreamer (partials) + InterruptionDetector (noise gate)
+  llm_tools.py        Groq tool-calling (OpenAI-compatible, env-switchable model)
   demo_scenario.py    shared acceptance scenario (dashboard + evidence, one path)
   event_log.py        §5.4 structured JSON events, monotonic ms
   tool_client.py      LocalToolClient (in-process) | HttpToolClient (FastAPI)
 backend/
-  main.py             FastAPI: tools + /token + /demo/run + UI mount
+  main.py             FastAPI: tools + /ws/call (live voice) + /demo/run + UI mount
+  voice.py            VoiceCallSession: browser PCM ↔ Deepgram ↔ Groq ↔ tools ↔ Rime
   tools.py            lookup / validate / commit — writes only commit when non-stale
   db.py models.py     SQLAlchemy (Postgres | SQLite), synthetic bookings
   seed.py             40 deterministic synthetic rows (seed 42)
 redis_state/
   session_store.py    turn_version, pending_tools, confirmed state (redis | fakeredis)
 web/index.html        Dark-theme SPA: evidence dashboard + live-call orb UI
-tests/                14 tests: 3 invariants, stale-write, monotonicity, cancel wrapper
-evidence/             run_acceptance_test.sh + collect_evidence.py + artifacts
+tests/                18 tests: 3 invariants, stale-write, monotonicity, cancel wrapper
+evidence/             run_acceptance_test.sh + collect_evidence.py + preflight.py + artifacts
 ```
 
 ## Testing & evidence
@@ -173,4 +168,5 @@ Three invariants asserted (details in `RIME_EVIDENCE.md`):
 
 - No real customer data — synthetic seed only
 - `.env` git-ignored; secrets never appear in code, docs, or logs
-- LiveKit tokens are minted server-side with scoped grants (`/token`)
+- Rime/Deepgram API keys stay server-side (Bearer/Token headers); the browser only ever
+  sees PCM audio bytes and control JSON on `/ws/call`

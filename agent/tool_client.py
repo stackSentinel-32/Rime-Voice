@@ -14,8 +14,10 @@ from typing import Optional
 
 from backend.tools import (
     commit_booking,
+    find_bookings,
     lookup_booking,
     validate_cancel,
+    validate_create,
     validate_update,
 )
 
@@ -31,6 +33,17 @@ class LocalToolClient:
         if tool_name == "lookup_booking":
             with self._sf() as s:
                 return {"turn_version": turn_version, "booking": lookup_booking(s, args["booking_id"])}
+        if tool_name == "find_bookings":
+            with self._sf() as s:
+                return {"turn_version": turn_version,
+                        "bookings": find_bookings(s, args.get("customer_name", ""),
+                                                  args.get("phone", ""))}
+        if tool_name == "create_booking":
+            with self._sf() as s:
+                return {"turn_version": turn_version,
+                        "proposal": validate_create(
+                            s, args["customer_name"], args["date"], args["time"],
+                            args.get("service_type", "Haircut"), args.get("phone", ""))}
         if tool_name == "update_booking":
             with self._sf() as s:
                 return {"turn_version": turn_version,

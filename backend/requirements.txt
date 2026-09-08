@@ -5,4 +5,5 @@ psycopg2-binary>=2.9
 pydantic>=2.6
 redis>=5.0
 fakeredis>=2.20
-livekit-api>=0.7          # /token endpoint: mints LiveKit room tokens
+aiohttp>=3.9        # /ws/call: Deepgram + Rime streaming WebSockets
+openai>=1.40        # /ws/call: Groq tool decisions (OpenAI-compatible)

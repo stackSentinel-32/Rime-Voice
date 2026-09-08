@@ -25,12 +25,12 @@ services:
 
   backend:
     build: .
-    # Full .env flows in (RIME_*, GEMINI_*, LIVEKIT_*, DEEPGRAM_* for /token & /status);
+    # Full .env flows in (RIME_*, GEMINI_*, DEEPGRAM_* for /ws/call & /status);
     # the explicit `environment` overrides below still win, pointing at in-network hosts.
     env_file:
       - .env
     command: >
-      sh -c "python -c 'from backend.db import Base, make_engine; Base.metadata.create_all(make_engine())' &&
+      sh -c "python -c 'from backend.db import ensure_schema, make_engine; ensure_schema(make_engine())' &&
              python -m backend.seed &&
              uvicorn backend.main:app --host 0.0.0.0 --port 8000"
     environment:
@@ -50,19 +50,3 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    command: python -m agent.worker dev
-    env_file:
-      - .env
-    environment:
-      # container-internal overrides; LIVEKIT_*/RIME_*/DEEPGRAM_*/GEMINI_* come from .env
-      REDIS_URL: redis://redis:6379/0
-      BACKEND_URL: http://backend:8000
-    depends_on:
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
