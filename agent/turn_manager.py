@@ -8,26 +8,29 @@ Rules:
         fresh  (tagged == current) -> applied: mutations committed to Postgres, then spoken.
 
 The manager is transport-agnostic: `tts`, `store`, `events`, and `tools` are injected, so
-the same logic runs under the hermetic test and under the live LiveKit worker.
+the same logic runs under the hermetic test, the evidence dashboard, and the live
+WebSocket voice call (backend/voice.py).
 """
 from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
-MUTATING_TOOLS = {"update_booking", "cancel_booking"}
+MUTATING_TOOLS = {"update_booking", "cancel_booking", "create_booking"}
 
 
 class TurnManager:
     def __init__(self, session_id, store, events, tts, tools,
-                 render: Optional[Callable[[str, dict], str]] = None):
+                 render: Optional[Callable[[str, dict], str]] = None,
+                 reply_hook: Optional[Callable[[str, dict], Awaitable[str]]] = None):
         self.session_id = session_id
         self.store = store
         self.events = events
         self.tts = tts
         self.tools = tools
         self._render = render or self._default_render
+        self._reply_hook = reply_hook  # async (tool_name, payload) -> spoken text
         self._tasks: list[asyncio.Task] = []
         self.store.create_session()
 
@@ -75,13 +78,23 @@ class TurnManager:
         # fresh -> apply. Mutations are committed ONLY here, so stale writes never persist.
         if tool_name in MUTATING_TOOLS:
             payload = await self.tools.commit(result["proposal"])
+        elif tool_name == "find_bookings":
+            payload = result.get("bookings", [])
         else:
             payload = result.get("booking", result.get("proposal"))
         self.store.set_confirmed_state(payload)
         self.events.log("tool_call_result", tool=tool_name, tool_call_id=tool_call_id,
                         turn_version_at_result=version_at_result,
                         current_turn_version=current, action="applied")
-        self.tts.speak(self._render(tool_name, payload), current)
+        # natural-language confirmation (or the render template as fallback)
+        if self._reply_hook is not None:
+            try:
+                text = await self._reply_hook(tool_name, payload)
+            except Exception:
+                text = self._render(tool_name, payload)
+        else:
+            text = self._render(tool_name, payload)
+        self.tts.speak(text, current)
 
     async def join(self):
         if self._tasks:

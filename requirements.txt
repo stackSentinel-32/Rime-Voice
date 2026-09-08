@@ -1,14 +1,9 @@
-# Full app (live deployment) — everything in requirements-dev.txt plus transport/infra.
-# The hermetic test suite (./evidence/run_acceptance_test.sh) needs only requirements-dev.txt.
-#
+# Full app (live deployment). The voice pipeline runs in the backend process:
+# Deepgram + Rime streaming WebSockets, Groq tool decisions — NO LiveKit.
 # Pin exact versions at submission time after a clean install.
 
-livekit-agents[openai]~=1.2
-livekit-plugins-deepgram~=1.2
-livekit-plugins-rime~=1.8
-livekit-plugins-silero~=1.2
-livekit-plugins-google~=1.2
-google-genai>=1.0
+aiohttp>=3.9
+openai>=1.40
 redis>=5.0
 sqlalchemy>=2.0
 psycopg2-binary>=2.9

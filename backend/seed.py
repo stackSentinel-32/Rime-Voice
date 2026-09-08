@@ -11,8 +11,8 @@ _FIRST = ["Aarav", "Diya", "Kabir", "Meera", "Rohan", "Ananya", "Vivaan", "Ishit
           "Arjun", "Sara", "Reyansh", "Anika", "Advait", "Nisha", "Dhruv", "Priya",
           "Kiaan", "Tara", "Veer", "Zara"]
 _LAST = ["Sharma", "Iyer", "Khan", "Nair", "Gupta", "Reddy", "Bose", "Mehta", "Rao", "Das"]
-_SERVICES = ["Consultation", "Dental Cleaning", "Eye Checkup", "Physiotherapy",
-             "Health Screening", "Follow-up"]
+_SERVICES = ["Haircut", "Blowout", "Hair Coloring", "Highlights",
+             "Keratin Treatment", "Beard Trim", "Shampoo & Style", "Bridal Styling"]
 _DATES = ["2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15",
           "2026-09-16", "2026-09-17", "2026-09-18"]
 _TIMES = ["09:00", "09:30", "10:00", "10:30", "11:00", "14:00", "14:30", "15:00", "15:30", "16:00"]
@@ -25,6 +25,7 @@ def build_rows(n: int = 40, seed: int = 42) -> list[Booking]:
         Booking(
             id=i,
             customer_name=f"{rng.choice(_FIRST)} {rng.choice(_LAST)}",
+            phone=f"+91-9{rng.randint(10**8, 10**9 - 1)}",   # synthetic Indian mobile
             date=rng.choice(_DATES),
             time=rng.choice(_TIMES),
             service_type=rng.choice(_SERVICES),

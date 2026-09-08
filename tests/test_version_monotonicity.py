@@ -57,3 +57,23 @@ def test_rapid_double_interruption(make_tm):
     applied = [e for e in results if e["action"] == "applied"]
     assert len(stale) == 1 and stale[0]["turn_version_at_result"] == 1
     assert len(applied) == 1 and applied[0]["turn_version_at_result"] == 3
+
+
+def test_reply_hook_speaks_natural_confirmation(make_tm, db_sf):
+    """Fresh (non-stale) tool results speak through the reply_hook (Gemini confirmation);
+    stale results never reach it, and nothing stale is ever spoken."""
+    tm, store, events, tts = make_tm("reply-hook")
+
+    async def hook(tool_name, payload):
+        return f"NATURAL: {tool_name} -> {payload['date']}"
+
+    tm._reply_hook = hook
+
+    async def scenario():
+        await tm.dispatch_tool("update_booking", {"booking_id": 12, "changes": {"date": "2026-09-18"}})
+        await tm.join()
+
+    asyncio.run(scenario())
+    assert tts.spoken, "agent never spoke"
+    assert "NATURAL:" in tts.spoken[-1][0]          # confirmation came from the hook
+    assert len(tts.spoken) == 1                     # exactly one utterance, nothing stale

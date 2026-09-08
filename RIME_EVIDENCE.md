@@ -72,7 +72,7 @@ delay, interrupt at 1500 ms), N = 5 runs (1 cold + 4 warm). Regenerate with
 
 The orchestration cancel path is sub-millisecond because it is a version check + flag flip
 in-process. **End-to-end audio cancellation** additionally includes the STT partial-transcript
-floor (~150 ms) plus Rime/LiveKit transport — see Limitations.
+floor (~150 ms) plus Rime/network transport — see Limitations.
 
 The same scenario is replayable live from the dashboard (`/` → *Interruption Evidence* →
 **Run interruption scenario**), which runs the identical code path (`agent/demo_scenario.py`)
@@ -85,15 +85,16 @@ against the deployment's real database — the dashboard and this file cannot dr
   time and is *additional* to the orchestration cancel-path latency measured above.
 - **What the automated test measures.** The hermetic test isolates the versioning/cancel logic
   (detection → version bump → TTS cancel → stale discard → commit gating) against in-process
-  fakes. End-to-end audio cancellation additionally includes network + Rime plugin behavior.
-- **Rime mid-stream cancellation (load-bearing, Phase 0).** The Rime wrapper
-  (`agent/tts_rime.py`) probes for a native cancel method (`interrupt`/`stop`/`cancel`/`aclose`/`clear`)
-  at runtime and always falls back to a client-side buffer drop (stop forwarding chunks).
-  **Status: mechanism implemented and unit-tested (`tests/test_worker_logic.py`), but native
-  server-side cancel has NOT yet been verified against the live Rime plugin — verify with real
-  keys before submission and record which mechanism fired here.**
+  fakes. End-to-end audio cancellation additionally includes network + Rime streaming behavior.
+- **Rime mid-stream cancellation (load-bearing, Phase 0).** The Rime client
+  (`agent/tts_rime.py`) speaks the ws3 JSON WebSocket directly: cancel sends the
+  documented `{"operation": "clear"}` (discards the synthesis buffer server-side) and
+  drops locally buffered chunks, plus a browser-side queue clear. Unit-tested
+  (`tests/test_worker_logic.py`); **the live ws3 `clear` path is exercised by the
+  /ws/call smoke test and preflight, and must be re-verified with real keys at
+  submission time — record the measured mechanism here.**
 - **Fallback disclosure.** If STT falls back to Whisper-local, or the LLM/Rime uses any fallback
-  path, it is surfaced at `/status` and in the UI header pills. Live-call endpoints return 503
-  with a clear message (never a fake success) when keys are absent.
+  path, it is surfaced at `/status` and in the UI header pills. The live call closes with a
+  logged event (never a fake success) when keys are absent.
 - **Synthetic data only.** All bookings are generated (`backend/seed.py`, deterministic seed 42).
   No real customer data anywhere.

@@ -30,9 +30,8 @@ import urllib.request
 # ---------------------------------------------------------------- env loading
 
 REQUIRED = ["RIME_API_KEY", "RIME_MODEL", "RIME_SPEAKER", "RIME_LANG",
-            "GEMINI_API_KEY", "GEMINI_MODEL"]
-OPTIONAL = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
-            "DEEPGRAM_API_KEY", "DEEPGRAM_MODEL", "REDIS_URL", "DATABASE_URL"]
+            "GROQ_API_KEY", "GROQ_MODEL"]
+OPTIONAL = ["DEEPGRAM_API_KEY", "DEEPGRAM_MODEL", "REDIS_URL", "DATABASE_URL", "STT_PROVIDER"]
 
 _PLACEHOLDER_HINTS = ("your_", "changeme", "<", "xxx")
 
@@ -92,18 +91,20 @@ def check_rime(key: str, model: str, speaker: str, lang: str) -> tuple[bool, str
         return False, f"network error: {e}"
 
 
-def check_gemini(key: str, model: str) -> tuple[bool, str]:
+def check_groq(key: str, model: str) -> tuple[bool, str]:
+    """Validate a Groq key AND that the model id is live (OpenAI-compatible).
+    Sends a User-Agent: Groq's Cloudflare 403-blocks bare default clients."""
     try:
         status, data = _http(
-            "GET", "https://generativelanguage.googleapis.com/v1beta/models",
-            headers={"x-goog-api-key": key},
+            "GET", "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {key}",
+                     "User-Agent": "rime-voice/1.0"},
         )
-        names = [m.get("name", "").removeprefix("models/")
-                 for m in json.loads(data).get("models", [])]
+        names = [m.get("id", "") for m in json.loads(data).get("data", [])]
         if model in names:
-            return True, f"model id '{model}' is live in the catalog ({len(names)} models)"
-        return False, f"model id '{model}' NOT in live catalog — nearest: " + \
-                      ", ".join(sorted(n for n in names if model.split('-')[0] in n)[:5])
+            return True, f"model id '{model}' is live on Groq ({len(names)} models)"
+        return False, f"model id '{model}' NOT live on Groq — available: " + \
+                      ", ".join(sorted(names)[:8])
     except urllib.error.HTTPError as e:
         return False, f"API rejected key (HTTP {e.code})"
     except Exception as e:
@@ -182,8 +183,6 @@ def main() -> int:
             warnings += 1
         else:
             rows.append((k, "PASS", "set"))
-    if _val(dotenv, "LIVEKIT_URL") and not _val(dotenv, "LIVEKIT_URL").startswith("wss://"):
-        add("LIVEKIT_URL scheme", False, "must start with wss://", warn_only=True)
 
     # layer 2: live checks
     if not offline_only:
@@ -192,10 +191,10 @@ def main() -> int:
         if not _is_placeholder(rime_key):
             ok, d = check_rime(rime_key, model, speaker, lang)
             add("Rime live synthesis (model+speaker+lang triple)", ok, d)
-        gem_key, gem_model = _val(dotenv, "GEMINI_API_KEY"), _val(dotenv, "GEMINI_MODEL")
-        if not _is_placeholder(gem_key):
-            ok, d = check_gemini(gem_key, gem_model)
-            add("Gemini model catalog", ok, d)
+        groq_key, groq_model = _val(dotenv, "GROQ_API_KEY"), _val(dotenv, "GROQ_MODEL")
+        if not _is_placeholder(groq_key):
+            ok, d = check_groq(groq_key, groq_model)
+            add("Groq model catalog", ok, d)
         dg_key = _val(dotenv, "DEEPGRAM_API_KEY")
         if not _is_placeholder(dg_key):
             ok, d = check_deepgram(dg_key, _val(dotenv, "DEEPGRAM_MODEL"))
