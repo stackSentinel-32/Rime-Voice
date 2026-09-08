@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# --retries/--timeout: PyPI from this network is flaky; fail only after real retries
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 
 COPY agent/ ./agent/
 COPY backend/ ./backend/
