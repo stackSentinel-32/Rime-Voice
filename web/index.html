@@ -306,7 +306,7 @@ async function loadStatus() {
     const st = await (await fetch("/status")).json();
     const on = (v, unset) => (v && v !== "unset") ? `<b>${fmt(v)}</b>` : `<span style="opacity:.55">${unset || "not configured"}</span>`;
     $("#pills").innerHTML = `
-      <span class="pill ${st.llm_model !== "unset" ? "on" : ""}"><span class="dot"></span>LLM ${on(st.llm_model)}</span>
+      <span class="pill ${st.llm_model !== "unset" ? "on" : ""}"><span class="dot"></span>Gemini ${on(st.llm_model)}</span>
       <span class="pill on"><span class="dot"></span>STT ${on(st.stt_provider)}</span>
       <span class="pill ${st.rime_model !== "unset" ? "on" : ""}"><span class="dot"></span>TTS rime · ${on(st.rime_model)}</span>
       <span class="pill on"><span class="dot"></span>turn-versioning active</span>`;

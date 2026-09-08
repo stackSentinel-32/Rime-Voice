@@ -7,7 +7,7 @@
 #   LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET  -> enables /token (live call tab)
 #   REDIS_URL (e.g. Upstash free tier)                  -> shared session state
 #   DATABASE_URL (e.g. Render Postgres free)            -> durable bookings
-#   RIME_* / DEEPGRAM_* / LLM_*                         -> live agent worker (see README)
+#   RIME_* / DEEPGRAM_* / GEMINI_*                      -> live agent worker (see README)
 #
 services:
   - type: web
@@ -36,11 +36,9 @@ services:
         sync: false
       - key: DEEPGRAM_API_KEY
         sync: false
-      - key: LLM_BASE_URL
+      - key: GEMINI_API_KEY
         sync: false
-      - key: LLM_API_KEY
-        sync: false
-      - key: LLM_MODEL
+      - key: GEMINI_MODEL
         sync: false
       - key: REDIS_URL
         sync: false

@@ -48,7 +48,8 @@ def status():
         "rime_model": os.getenv("RIME_MODEL", "unset"),
         "rime_speaker": os.getenv("RIME_SPEAKER", "unset"),
         "rime_lang": os.getenv("RIME_LANG", "unset"),
-        "llm_model": os.getenv("LLM_MODEL", "unset"),
+        "llm_provider": "google-gemini",
+        "llm_model": os.getenv("GEMINI_MODEL", "unset"),
         "tool_call_delay_ms": _default_delay(),
     }
 

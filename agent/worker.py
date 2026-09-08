@@ -62,7 +62,14 @@ async def entrypoint(ctx):
     def _on_stt(ev):
         fired = detector.on_user_speech(getattr(ev, "transcript", ""), getattr(ev, "is_final", False))
         if not fired and getattr(ev, "is_final", False):
-            decision = decide_tool(llm, ev.transcript)
+            if llm is None:
+                events.log("llm_unavailable", hint="GEMINI_API_KEY not set")
+                return
+            try:
+                decision = decide_tool(llm, ev.transcript)
+            except Exception as e:  # external API boundary: log, never kill the callback loop
+                events.log("llm_error", error=str(e)[:200])
+                return
             if decision:
                 detector.set_agent_busy(True)
                 import asyncio
@@ -73,14 +80,14 @@ async def entrypoint(ctx):
 
 def _livekit_components() -> dict:
     """Build the STT/LLM/TTS plugin instances from env. Imported lazily by entrypoint."""
-    from livekit.plugins import deepgram, openai, rime, silero
+    from livekit.plugins import deepgram, google, rime, silero
 
     return {
         "vad": silero.VAD.load(),
         "stt": deepgram.STT(model=os.getenv("DEEPGRAM_MODEL", "nova-2"), interim_results=True),
-        "llm": openai.LLM(model=os.getenv("LLM_MODEL", "gpt-4o-mini")),
+        "llm": google.LLM(model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash")),
         "tts": rime.TTS(
-            model=os.getenv("RIME_MODEL", "mistv2"),
+            model=os.getenv("RIME_MODEL", "mistv3"),
             speaker=os.getenv("RIME_SPEAKER", "cove"),
         ),
     }

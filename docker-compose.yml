@@ -34,7 +34,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       TOOL_CALL_DELAY_MS: ${TOOL_CALL_DELAY_MS:-0}
       STT_PROVIDER: ${STT_PROVIDER:-deepgram}
-      LLM_MODEL: ${LLM_MODEL:-unset}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
     ports:
       - "8000:8000"
     depends_on:

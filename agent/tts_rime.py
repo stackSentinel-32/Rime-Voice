@@ -32,9 +32,9 @@ class RimeTTS:
         self._events = event_logger
         self._dropped = False
         self.last_cancel_mechanism: Optional[str] = None
-        self.model = os.getenv("RIME_MODEL", "mistv2")
+        self.model = os.getenv("RIME_MODEL", "mistv3")
         self.speaker = os.getenv("RIME_SPEAKER", "cove")
-        self.lang = os.getenv("RIME_LANG", "eng")
+        self.lang = os.getenv("RIME_LANG", "en")
 
     @property
     def buffer_dropped(self) -> bool:
