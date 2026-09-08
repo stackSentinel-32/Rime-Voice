@@ -470,7 +470,7 @@ async function connectCall() {
     }
     const {token, url} = await r.json();
     callLog("token ok · loading LiveKit SDK…");
-    await loadScript("https://unpkg.com/@livekit/livekit-client@2/dist/livekit-client.umd.min.js");
+    await loadScript("https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js");
 
     room = new LivekitClient.Room({adaptiveStream: true, dynacast: true});
     room.on("trackSubscribed", (track) => {
@@ -487,7 +487,8 @@ async function connectCall() {
     await room.connect(url, token);
     const tracks = await LivekitClient.createLocalTracks({audio: true});
     micTrack = tracks.find(t => t.kind === "audio");
-    await room.publishTrack(micTrack);
+    // livekit-client v2: publishing goes through the local participant
+    await room.localParticipant.publishTrack(micTrack);
     startMicMeter(micTrack);
     setConn("connected · mic live", true);
     setOrb("listening", "listening — speak to the agent");
@@ -526,7 +527,7 @@ async function hangup(manual = true) {
   if (rafId) cancelAnimationFrame(rafId);
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   if (room) { try { await room.disconnect(); } catch {} room = null; }
-  micTrack = null;
+  if (micTrack) { try { micTrack.stop(); } catch {} micTrack = null; }  // release the mic device
   $("#meter").style.display = "none"; $("#meter-fill").style.width = "0%";
   $("#btn-connect").style.display = "inline-block"; $("#btn-hangup").style.display = "none";
   setConn("disconnected", false);

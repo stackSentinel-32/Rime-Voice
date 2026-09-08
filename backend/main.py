@@ -67,7 +67,8 @@ def token(room: str = Query("demo"), identity: str = Query("judge")):
         raise HTTPException(503, "livekit-api not installed on this deployment")
     t = api.AccessToken(key, secret).with_identity(identity).with_name(identity)
     t.with_grants(api.VideoGrants(room_join=True, room=room, can_publish=True, can_subscribe=True))
-    return {"token": t.to_jwt(), "room": room, "identity": identity}
+    return {"token": t.to_jwt(), "url": os.getenv("LIVEKIT_URL", ""),
+            "room": room, "identity": identity}
 
 
 # ---- booking tools --------------------------------------------------------

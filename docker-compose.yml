@@ -50,3 +50,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file:
+      - .env
+    environment:
+      # container-internal overrides; LIVEKIT_*/RIME_*/DEEPGRAM_*/GEMINI_* come from .env
+      REDIS_URL: redis://redis:6379/0
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
