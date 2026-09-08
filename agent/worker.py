@@ -22,6 +22,23 @@ from agent.turn_manager import TurnManager
 from redis_state.session_store import SessionStore, make_redis_client
 
 
+def _load_dotenv() -> None:
+    """Load .env from the repo root (stdlib only; real env vars always win)."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k.strip(), v.split(" #")[0].strip().strip('"').strip("'"))
+
+
+_load_dotenv()
+
+
 def build_orchestrator(session_id: str, livekit_session=None, session_factory=None):
     """Compose the turn-versioning stack for one call. Returns (tm, detector, tts, events)."""
     events = EventLogger(session_id)

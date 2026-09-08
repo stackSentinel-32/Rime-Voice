@@ -5,3 +5,4 @@ psycopg2-binary>=2.9
 pydantic>=2.6
 redis>=5.0
 fakeredis>=2.20
+livekit-api>=0.7          # /token endpoint: mints LiveKit room tokens

@@ -25,6 +25,10 @@ services:
 
   backend:
     build: .
+    # Full .env flows in (RIME_*, GEMINI_*, LIVEKIT_*, DEEPGRAM_* for /token & /status);
+    # the explicit `environment` overrides below still win, pointing at in-network hosts.
+    env_file:
+      - .env
     command: >
       sh -c "python -c 'from backend.db import Base, make_engine; Base.metadata.create_all(make_engine())' &&
              python -m backend.seed &&
@@ -34,7 +38,6 @@ services:
       REDIS_URL: redis://redis:6379/0
       TOOL_CALL_DELAY_MS: ${TOOL_CALL_DELAY_MS:-0}
       STT_PROVIDER: ${STT_PROVIDER:-deepgram}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
     ports:
       - "8000:8000"
     depends_on:
