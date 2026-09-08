@@ -110,13 +110,40 @@ def check_gemini(key: str, model: str) -> tuple[bool, str]:
         return False, f"network error: {e}"
 
 
-def check_deepgram(key: str) -> tuple[bool, str]:
+def check_deepgram(key: str, model: str = "") -> tuple[bool, str]:
+    """Handshake the STREAMING WebSocket the agent actually uses (stdlib-only).
+
+    Catches what a REST auth check misses: revoked/expired keys and exhausted
+    credits return 401 here too, and model-tier problems surface on connect.
+    """
+    import base64
+    import socket
+    import ssl
+
+    query = f"model={model}" if model else ""
     try:
-        status, _ = _http("GET", "https://api.deepgram.com/v1/projects",
-                          headers={"Authorization": f"Token {key}"})
-        return status == 200, "key valid"
-    except urllib.error.HTTPError as e:
-        return False, f"HTTP {e.code} (401 = invalid key)"
+        ctx = ssl.create_default_context()
+        with socket.create_connection(("api.deepgram.com", 443), timeout=12) as sock:
+            with ctx.wrap_socket(sock, server_hostname="api.deepgram.com") as tls:
+                req = (
+                    f"GET /v1/listen{('?' + query) if query else ''} HTTP/1.1\r\n"
+                    "Host: api.deepgram.com\r\n"
+                    f"Authorization: Token {key}\r\n"
+                    "Upgrade: websocket\r\n"
+                    "Connection: Upgrade\r\n"
+                    f"Sec-WebSocket-Key: {base64.b64encode(os.urandom(16)).decode()}\r\n"
+                    "Sec-WebSocket-Version: 13\r\n\r\n"
+                )
+                tls.sendall(req.encode())
+                status_line = tls.recv(1024).decode(errors="replace").split("\r\n")[0]
+                if " 101 " in status_line:
+                    return True, f"streaming WebSocket auth ok{f' (model={model})' if model else ''}"
+                code = status_line.split(" ")[1] if " " in status_line else "?"
+                hint = {
+                    "401": "auth failed — key invalid, revoked, or credits exhausted "
+                           "(check console.deepgram.com → API keys & balance)",
+                }.get(code, f"HTTP {code} on handshake")
+                return False, f"streaming handshake rejected: {hint}"
     except Exception as e:
         return False, f"network error: {e}"
 
@@ -171,8 +198,8 @@ def main() -> int:
             add("Gemini model catalog", ok, d)
         dg_key = _val(dotenv, "DEEPGRAM_API_KEY")
         if not _is_placeholder(dg_key):
-            ok, d = check_deepgram(dg_key)
-            add("Deepgram auth", ok, d)
+            ok, d = check_deepgram(dg_key, _val(dotenv, "DEEPGRAM_MODEL"))
+            add("Deepgram streaming auth (WS + model)", ok, d)
 
     for name, status, detail in rows:
         print(f"  [{status:^4}] {name:<46} {detail}")

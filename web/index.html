@@ -459,8 +459,9 @@ function loadScript(src) {
 async function connectCall() {
   const btn = $("#btn-connect"); btn.disabled = true; btn.textContent = "connecting…";
   try {
+    const roomName = "demo-" + Math.random().toString(36).slice(2, 8);  // fresh room => fresh agent dispatch
     callLog("requesting room token…");
-    const r = await fetch(`/token?room=demo&identity=judge-${Math.random().toString(36).slice(2, 6)}`);
+    const r = await fetch(`/token?room=${roomName}&identity=judge-${Math.random().toString(36).slice(2, 6)}`);
     if (!r.ok) {
       const err = await r.json().catch(() => ({detail: r.status}));
       callLog("live call unavailable: " + err.detail, "err");

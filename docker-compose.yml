@@ -55,6 +55,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    command: python -m agent.worker dev
     env_file:
       - .env
     environment:

@@ -65,12 +65,21 @@ def build_orchestrator(session_id: str, livekit_session=None, session_factory=No
 
 async def entrypoint(ctx):
     """LiveKit Agents entrypoint. `ctx` is a JobContext."""
-    from livekit.agents import AgentSession  # deferred heavy import
+    from livekit.agents import Agent, AgentSession  # deferred heavy import
+
+    class BookingAgent(Agent):
+        def __init__(self):
+            super().__init__(
+                instructions=(
+                    "You are a concise voice booking assistant. Answer briefly; tool "
+                    "dispatches are handled by the surrounding turn-versioned pipeline."
+                )
+            )
 
     session_id = getattr(getattr(ctx, "room", None), "name", None) or uuid.uuid4().hex[:8]
     llm = make_llm()
     print(f"[worker] session={session_id} stt={stt_config()['provider']} "
-          f"rime_model={os.getenv('RIME_MODEL', 'unset')}")
+          f"rime_model={os.getenv('RIME_MODEL', 'unset')} gemini={os.getenv('GEMINI_MODEL', 'unset')}")
 
     livekit_session = AgentSession(**_livekit_components())
     tm, detector, tts, events = build_orchestrator(session_id, livekit_session=livekit_session)
@@ -92,7 +101,14 @@ async def entrypoint(ctx):
                 import asyncio
                 asyncio.create_task(tm.dispatch_tool(decision["tool"], decision["args"]))
 
-    await livekit_session.start(room=ctx.room)
+    await livekit_session.start(BookingAgent(), room=ctx.room)
+    # greet immediately: instant proof that Rime audio works in both directions,
+    # and barge-in on the greeting exercises the interrupt path from the first second
+    detector.set_agent_busy(True)
+    tm.tts.speak(
+        "Hi! I'm your booking assistant. Try: check my booking twelve — and interrupt me any time.",
+        tm.store.get_turn_version(),
+    )
 
 
 def _livekit_components() -> dict:
@@ -102,10 +118,15 @@ def _livekit_components() -> dict:
     return {
         "vad": silero.VAD.load(),
         "stt": deepgram.STT(model=os.getenv("DEEPGRAM_MODEL", "nova-2"), interim_results=True),
-        "llm": google.LLM(model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash")),
+        # google plugin reads GOOGLE_API_KEY, not GEMINI_API_KEY — pass it explicitly
+        "llm": google.LLM(
+            model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+            api_key=os.getenv("GEMINI_API_KEY"),
+        ),
         "tts": rime.TTS(
             model=os.getenv("RIME_MODEL", "mistv3"),
             speaker=os.getenv("RIME_SPEAKER", "cove"),
+            api_key=os.getenv("RIME_API_KEY"),
         ),
     }
 
