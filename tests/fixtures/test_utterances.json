@@ -1,0 +1,37 @@
+{
+  "normal_flow": {
+    "description": "Happy path — no interruption",
+    "utterances": [
+      {"t_ms": 0, "text": "I'd like to check my booking for Thursday", "booking_id": 12}
+    ]
+  },
+  "mid_tool_call_interruption": {
+    "description": "Interrupt while a slow tool call is in flight (the acceptance scenario)",
+    "tool_call_delay_ms": 4000,
+    "utterances": [
+      {"t_ms": 0, "text": "Check my booking 12 for Thursday", "booking_id": 12},
+      {"t_ms": 1500, "text": "Actually, make that Friday", "changes": {"date": "2026-09-18"}}
+    ]
+  },
+  "full_cancel_and_restart": {
+    "description": "Interrupt with an unrelated new request entirely",
+    "utterances": [
+      {"t_ms": 0, "text": "Check my booking 12 for Thursday", "booking_id": 12},
+      {"t_ms": 1500, "text": "Never mind, cancel booking 7 instead", "booking_id": 7, "tool": "cancel_booking"}
+    ]
+  },
+  "noise_garbage": {
+    "description": "Nonsense audio / silence — must NOT bump the version",
+    "utterances": [
+      {"t_ms": 0, "text": "", "note": "silence / sub-threshold noise"}
+    ]
+  },
+  "rapid_double_interruption": {
+    "description": "Two interruptions in quick succession — stress version monotonicity",
+    "utterances": [
+      {"t_ms": 0, "text": "Check my booking 12 for Thursday", "booking_id": 12},
+      {"t_ms": 1200, "text": "No wait, Friday", "changes": {"date": "2026-09-18"}},
+      {"t_ms": 1400, "text": "Actually Monday", "changes": {"date": "2026-09-14"}}
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+# Render deployment — single free web service.
+#
+# Deploys the FastAPI app (UI + dashboard + booking tools + LiveKit token endpoint)
+# on SQLite + in-process state. It boots and demos the interruption evidence with
+# ZERO secrets. Add secrets in the Render dashboard to level up:
+#
+#   LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET  -> enables /token (live call tab)
+#   REDIS_URL (e.g. Upstash free tier)                  -> shared session state
+#   DATABASE_URL (e.g. Render Postgres free)            -> durable bookings
+#   RIME_* / DEEPGRAM_* / GEMINI_*                      -> live agent worker (see README)
+#
+services:
+  - type: web
+    name: rime-voice
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: STT_PROVIDER
+        value: deepgram
+      # secrets — set these in the Render dashboard (sync: false = do not commit values)
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: RIME_API_KEY
+        sync: false
+      - key: RIME_MODEL
+        sync: false
+      - key: RIME_SPEAKER
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false

@@ -1,0 +1,9 @@
+# secrets never enter image build contexts
+.env
+.venv/
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+evidence/*.json
+*.db

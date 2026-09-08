@@ -1,0 +1,68 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rime
+      POSTGRES_PASSWORD: rime
+      POSTGRES_DB: rime
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rime"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: .
+    # Full .env flows in (RIME_*, GEMINI_*, LIVEKIT_*, DEEPGRAM_* for /token & /status);
+    # the explicit `environment` overrides below still win, pointing at in-network hosts.
+    env_file:
+      - .env
+    command: >
+      sh -c "python -c 'from backend.db import Base, make_engine; Base.metadata.create_all(make_engine())' &&
+             python -m backend.seed &&
+             uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://rime:rime@postgres:5432/rime
+      REDIS_URL: redis://redis:6379/0
+      TOOL_CALL_DELAY_MS: ${TOOL_CALL_DELAY_MS:-0}
+      STT_PROVIDER: ${STT_PROVIDER:-deepgram}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: python -m agent.worker dev
+    env_file:
+      - .env
+    environment:
+      # container-internal overrides; LIVEKIT_*/RIME_*/DEEPGRAM_*/GEMINI_* come from .env
+      REDIS_URL: redis://redis:6379/0
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
