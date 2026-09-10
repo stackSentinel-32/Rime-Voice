@@ -47,6 +47,9 @@ class VoiceCallSession:
             on_done=self._speech_done,
             event_logger=self.events,
         )
+        # pay the ~1.3s Rime ws3 handshake NOW, not inside the first speak():
+        # the greeting's time-to-first-audio drops to just Rime's TTFB
+        self._tts_warmup = asyncio.create_task(self.tts.warm_up())
         self.tm = TurnManager(
             self.sid, self.store, self.events, self.tts,
             LocalToolClient(session_factory),
@@ -61,9 +64,10 @@ class VoiceCallSession:
     # Audio is DROPS-not-BLOCKS: voice must never backpressure the reader. If the
     # browser can't keep up we shed queued frames rather than stall synthesis,
     # then resume once the writer drains back below the cap.
-    # ~2s of 24kHz/16bit audio in flight: absorbs main-thread hiccups without ever
-    # dropping speech (only sheds past a 2s backlog)
-    _MAX_QUEUED_AUDIO = 96
+    # Measured Rime burst (evidence/probe_rime_cadence.py): a 13s utterance
+    # arrives as ~670 chunks in ~2s. The cap must ride out that burst plus main-
+    # thread hiccups; only shed past a ~4.6s backlog (240 x ~19ms chunks).
+    _MAX_QUEUED_AUDIO = 240
 
     async def _writer(self) -> None:
         while True:

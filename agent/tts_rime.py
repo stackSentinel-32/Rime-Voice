@@ -68,6 +68,7 @@ class RimeStreamer:
         self.active = False          # agent is (about to be) speaking
         self._dropped = False        # chunks stop being forwarded after a cancel
         self._last_audio_ts: Optional[float] = None   # updated by the reader
+        self._pcm_carry = b""    # 1-byte tail of a sample split across Rime frames
         self.last_cancel_mechanism: Optional[str] = None
 
     # ---- facade used by TurnManager (sync; schedules on the running loop) ----
@@ -107,15 +108,37 @@ class RimeStreamer:
                 pass
 
     # ---- async internals -----------------------------------------------------
+    async def warm_up(self) -> None:
+        """Open the TTS socket ahead of the first speak(). The ws3 handshake costs
+        ~1.3s (measured); paying it at session start instead of inside the first
+        _synthesize() shaves it off the greeting's time-to-first-audio. Safe to
+        race with speak(): both serialize on the same lock."""
+        if self._ws is not None and not self._ws.closed:
+            return
+        async with self._lock:
+            if self._ws is None or self._ws.closed:
+                try:
+                    await self._connect()
+                except Exception as e:
+                    if self._events:
+                        self._events.log("tts_warmup_error", error=str(e)[:200])
+
     async def _connect(self) -> None:
         import aiohttp
 
         url = ("wss://users-ws.rime.ai/ws3"
                f"?modelId={self.model}&speaker={self.speaker}&lang={self.lang}"
                f"&audioFormat=pcm&samplingRate={_SAMPLE_RATE}")
-        self._http = aiohttp.ClientSession()
-        self._ws = await self._http.ws_connect(
-            url, headers={"Authorization": f"Bearer {self._api_key}"}, heartbeat=30)
+        http = aiohttp.ClientSession()
+        try:
+            ws = await http.ws_connect(
+                url, headers={"Authorization": f"Bearer {self._api_key}"}, heartbeat=30)
+        except Exception:
+            await http.close()   # a failed handshake must not leak the session
+            raise
+        self._http = http
+        self._ws = ws
+        self._pcm_carry = b""   # byte stream restarts with each socket
         self._reader_task = asyncio.create_task(self._read_loop())
 
     async def _synthesize(self, token: object, text: str, turn_version: int) -> None:
@@ -179,12 +202,25 @@ class RimeStreamer:
                     continue
                 if data.get("type") in ("chunk", "audio") and data.get("data"):
                     if self._dropped:
-                        continue
+                        self._pcm_carry = b""  # cancelled stream: a pending half-
+                        continue                # sample never arrives; don't leak it
                     self._last_audio_ts = time.monotonic()
                     raw = base64.b64decode(data["data"])
+                    # Rime splits PCM16 SAMPLES across frame boundaries — odd-byte
+                    # frames are routine (measured: ~34 per 12s; a straddle leaves
+                    # every following frame byte-shifted -> static bursts at the
+                    # listener). Re-chunk with a 1-byte carry so every forwarded
+                    # frame is sample-aligned; the byte stream is unchanged.
+                    # (evidence/probe_straddle.py: seam deltas 34509 -> 4972)
+                    frame = self._pcm_carry + raw
+                    if len(frame) % 2:
+                        self._pcm_carry = frame[-1:]
+                        frame = frame[:-1]
+                    else:
+                        self._pcm_carry = b""
                     if self._on_audio:
                         try:
-                            res = self._on_audio(raw)
+                            res = self._on_audio(frame)
                             if asyncio.iscoroutine(res):
                                 await res
                         except Exception:
@@ -205,6 +241,7 @@ class RimeStreamer:
                 await self._fire_done(self._sent)  # socket died mid-utterance: end it
 
     async def _clear(self) -> None:
+        self._pcm_carry = b""    # server discards its buffer: pending half-sample is gone
         if self._ws is None or self._ws.closed:
             return
         try:

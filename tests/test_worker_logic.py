@@ -51,12 +51,21 @@ async def test_cancel_without_connection_is_safe():
 
 
 @pytest.mark.asyncio
-async def test_done_fires_exactly_once_per_utterance():
+async def test_done_fires_exactly_once_per_utterance(monkeypatch):
     """Natural done + stall watchdog + cancel must not double-fire speech_end."""
     done_count = []
 
     async def on_done():
         done_count.append(1)
+
+    class _FakeWS:
+        closed = False
+        async def send_str(self, s): pass
+
+    async def fake_connect(self):
+        self._ws = _FakeWS()
+
+    monkeypatch.setattr(RimeStreamer, "_connect", fake_connect)  # hermetic: no network
 
     tts = RimeStreamer(on_done=on_done)
     tts.speak("hello", 1)

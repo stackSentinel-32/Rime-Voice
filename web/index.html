@@ -619,6 +619,11 @@ async function connectCall() {
     if (ctx.state === "suspended") await ctx.resume();
     await ctx.audioWorklet.addModule("audio-worklet.js");
     playNode = new AudioWorkletNode(ctx, "pcm-player");
+    playNode.port.onmessage = (e) => {
+      if (e.data && e.data.underrun) {
+        callLog("audio: brief underrun — start cushion raised to " + e.data.cushion_ms + "ms", "warn");
+      }
+    };
     playNode.connect(ctx.destination);
 
     callLog("opening " + wsUrl() + " …");
